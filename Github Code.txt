@@ -1,0 +1,120 @@
+Github Code
+// Blynk IoT Smart Plant Monitoring System - Fully Working Version
+// Components: DHT11, Soil Moisture, PIR, Relay, Rain Sensor, I2C LCD
+// Tested on ESP8266 (NodeMCU)
+#define BLYNK_TEMPLATE_ID "TMPL6Wh0otiB7"
+#define BLYNK_TEMPLATE_NAME "smart agriculture"
+#define BLYNK_AUTH_TOKEN "J5vb2ayrRb5DE9iQzZdJySRtRB5HzMnI"
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>  // Recommended library for LCD
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+#include <DHT.h>
+// Initialize LCD (0x27 or 0x3F, 16x2)
+LiquidCrystal_I2C lcd(0x3F, 16, 2);  // Change to 0x27 if needed
+char auth[] = "J5vb2ayrRb5DE9iQzZdJySRtRB5HzMnI";
+char ssid[] = "Shakib";
+char pass[] = "12345678";
+#define DHTPIN D4
+#define SOIL_PIN A0
+#define PIR_PIN D5
+#define RELAY_PIN D3    // Relay control pin
+#define BUTTON_PIN D7   // Manual override button
+#define RAIN_PIN D6     // Rain sensor
+DHT dht(DHTPIN, DHT11);
+BlynkTimer timer;
+// Variables
+int PIR_ToggleValue = 0;
+int relayState = LOW;   // Start with relay OFF
+int buttonState = HIGH;
+bool rainDetected = false;
+WidgetLED pirLed(V5);
+WidgetLED rainLed(V7);
+void setup() {
+  Serial.begin(9600);
+  // Initialize LCD
+  lcd.init();
+  lcd.backlight();
+  lcd.print("System Starting");
+  delay(1000);
+  lcd.clear();
+  // Sensor setup
+  pinMode(PIR_PIN, INPUT);
+  pinMode(RELAY_PIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(RAIN_PIN, INPUT);
+  digitalWrite(RELAY_PIN, relayState);  // Initialize relay state
+  // Start Blynk
+  Blynk.begin(auth, ssid, pass);
+  dht.begin();
+  // Set up timers
+  timer.setInterval(1000L, readSensors);
+  timer.setInterval(500L, checkButton);
+  lcd.setCursor(0, 0);
+  lcd.print("Ready!");
+  delay(500);
+  lcd.clear();
+}
+void readSensors() {
+  // Temperature & Humidity
+  float t = dht.readTemperature();
+  float h = dht.readHumidity();
+  if (!isnan(t) && !isnan(h)) {
+    Blynk.virtualWrite(V0, t);
+    Blynk.virtualWrite(V1, h);
+    lcd.setCursor(0, 0);
+    lcd.print("T:");
+    lcd.print(t, 1);
+    lcd.print("C H:");
+    lcd.print(h, 1);
+    lcd.print("%");
+  }
+  int soilMoisture = map(analogRead(SOIL_PIN), 0, 1024, 0, 100);
+  Blynk.virtualWrite(V3, soilMoisture);
+  // Rain Detection (LOW = Rain detected)
+  rainDetected = (digitalRead(RAIN_PIN) == LOW);
+  Blynk.virtualWrite(V6, rainDetected ? 1 : 0);
+  rainDetected ? rainLed.on() : rainLed.off();
+  lcd.setCursor(0, 1);
+  lcd.print("S:");
+  lcd.print(soilMoisture);
+  lcd.print("% R:");
+  lcd.print(rainDetected ? "Y" : "N");
+  // PIR Motion Sensor
+  if (PIR_ToggleValue == 1) {
+    bool motion = digitalRead(PIR_PIN);
+    motion ? pirLed.on() : pirLed.off();
+    lcd.setCursor(9, 1);
+    lcd.print(motion ? "M:ON" : "M:OFF");
+  }
+  // Relay Status
+  lcd.setCursor(13, 1);
+  lcd.print(relayState ? "P:ON" : "P:OFF");
+}
+void checkButton() {
+  if (digitalRead(BUTTON_PIN) == LOW && buttonState != LOW) {
+    relayState = !relayState;
+    digitalWrite(RELAY_PIN, relayState);
+    Blynk.virtualWrite(V12, relayState);
+    buttonState = LOW;
+    delay(200);  // Debounce delay
+    Serial.print("Relay toggled: ");
+    Serial.println(relayState ? "ON" : "OFF");
+  } else if (digitalRead(BUTTON_PIN) == HIGH) {
+    buttonState = HIGH;
+  }
+}
+// Blynk Virtual Pin Handlers
+BLYNK_WRITE(V6) { 
+  PIR_ToggleValue = param.asInt(); 
+}
+BLYNK_WRITE(V12) { 
+  relayState = param.asInt();
+  digitalWrite(RELAY_PIN, relayState);
+  Serial.print("Blynk set relay: ");
+  Serial.println(relayState ? "ON" : "OFF");
+}
+void loop() {
+  Blynk.run();
+  timer.run();
+}
